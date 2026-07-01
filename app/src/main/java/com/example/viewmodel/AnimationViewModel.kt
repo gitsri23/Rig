@@ -50,6 +50,9 @@ class AnimationViewModel(application: Application) : AndroidViewModel(applicatio
     var currentLayerIndex by mutableStateOf(0)
         private set
 
+    var currentBgStyle by mutableStateOf("Grid") // Grid, Blank, Space, Sunset
+    var activeMusicLoop by mutableStateOf<String?>(null)
+
     var selectedTool by mutableStateOf("Draw") // Draw, Erase, Rig, Select
     var brushColor by mutableStateOf(0xFF00FFCC.toInt()) // Standard High-Contrast Neon Teal
     var brushWidth by mutableStateOf(10f)
@@ -198,6 +201,290 @@ class AnimationViewModel(application: Application) : AndroidViewModel(applicatio
         saveUndoState()
 
         currentLayers[currentLayerIndex] = currentLayers[currentLayerIndex].copy(strokes = emptyList())
+        currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
+        projectData = projectData.copy(frames = currentFrames)
+        saveCurrentProject()
+    }
+
+    // --- Layers & Art Management ---
+    fun selectLayer(index: Int) {
+        val frame = projectData.frames.getOrNull(currentFrameIndex) ?: return
+        if (index in 0 until frame.layers.size) {
+            currentLayerIndex = index
+        }
+    }
+
+    fun toggleLayerVisibility(index: Int) {
+        val currentFrames = projectData.frames.toMutableList()
+        val frame = currentFrames[currentFrameIndex]
+        val currentLayers = frame.layers.toMutableList()
+        val layer = currentLayers.getOrNull(index) ?: return
+        
+        currentLayers[index] = layer.copy(isVisible = !layer.isVisible)
+        currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
+        projectData = projectData.copy(frames = currentFrames)
+        saveCurrentProject()
+    }
+
+    fun updateLayerOpacity(index: Int, opacity: Float) {
+        val currentFrames = projectData.frames.toMutableList()
+        val frame = currentFrames[currentFrameIndex]
+        val currentLayers = frame.layers.toMutableList()
+        val layer = currentLayers.getOrNull(index) ?: return
+        
+        currentLayers[index] = layer.copy(opacity = opacity)
+        currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
+        projectData = projectData.copy(frames = currentFrames)
+        saveCurrentProject()
+    }
+
+    fun addLayer() {
+        val currentFrames = projectData.frames.toMutableList()
+        val frame = currentFrames[currentFrameIndex]
+        val currentLayers = frame.layers.toMutableList()
+        
+        val newLayerName = "Layer ${currentLayers.size + 1}"
+        currentLayers.add(LayerData(name = newLayerName))
+        currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
+        projectData = projectData.copy(frames = currentFrames)
+        currentLayerIndex = currentLayers.size - 1
+        saveCurrentProject()
+    }
+
+    fun deleteLayer(index: Int) {
+        val currentFrames = projectData.frames.toMutableList()
+        val frame = currentFrames[currentFrameIndex]
+        val currentLayers = frame.layers.toMutableList()
+        if (currentLayers.size <= 1) return // Keep at least one layer
+        
+        currentLayers.removeAt(index)
+        currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
+        projectData = projectData.copy(frames = currentFrames)
+        if (currentLayerIndex >= currentLayers.size) {
+            currentLayerIndex = currentLayers.size - 1
+        }
+        saveCurrentProject()
+    }
+
+    fun updateBgStyle(style: String) {
+        currentBgStyle = style
+    }
+
+    fun toggleMusicLoop(name: String) {
+        activeMusicLoop = if (activeMusicLoop == name) null else name
+    }
+
+    fun loadPresetCharacter(presetName: String) {
+        val currentFrames = projectData.frames.toMutableList()
+        val frame = currentFrames[currentFrameIndex]
+        val currentLayers = frame.layers.toMutableList()
+        val layer = currentLayers[currentLayerIndex]
+
+        saveUndoState()
+
+        val strokesList = mutableListOf<StrokePath>()
+
+        when (presetName) {
+            "Stickman Hero" -> {
+                // Head circle
+                val headPoints = mutableListOf<PointData>()
+                val numPoints = 16
+                val cx = 0.5f
+                val cy = 0.15f
+                val r = 0.05f
+                for (i in 0..numPoints) {
+                    val angle = (i * 2 * Math.PI / numPoints).toFloat()
+                    val px = cx + r * Math.cos(angle.toDouble()).toFloat()
+                    val py = cy + r * Math.sin(angle.toDouble()).toFloat()
+                    headPoints.add(PointData(px, py))
+                }
+                strokesList.add(StrokePath(points = headPoints, color = brushColor, width = brushWidth))
+
+                // Torso
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.20f), PointData(0.5f, 0.50f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+
+                // Left Arm
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.25f), PointData(0.35f, 0.35f), PointData(0.30f, 0.50f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+
+                // Right Arm
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.25f), PointData(0.65f, 0.35f), PointData(0.70f, 0.50f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+
+                // Left Leg
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.50f), PointData(0.42f, 0.68f), PointData(0.40f, 0.85f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+
+                // Right Leg
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.50f), PointData(0.58f, 0.68f), PointData(0.60f, 0.85f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+            }
+            "Cute Robot" -> {
+                // Head box
+                strokesList.add(StrokePath(
+                    points = listOf(
+                        PointData(0.42f, 0.10f),
+                        PointData(0.58f, 0.10f),
+                        PointData(0.58f, 0.22f),
+                        PointData(0.42f, 0.22f),
+                        PointData(0.42f, 0.10f)
+                    ),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Neck
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.48f, 0.22f), PointData(0.52f, 0.22f), PointData(0.52f, 0.25f), PointData(0.48f, 0.25f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Torso box
+                strokesList.add(StrokePath(
+                    points = listOf(
+                        PointData(0.38f, 0.25f),
+                        PointData(0.62f, 0.25f),
+                        PointData(0.62f, 0.52f),
+                        PointData(0.38f, 0.52f),
+                        PointData(0.38f, 0.25f)
+                    ),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Left arm
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.38f, 0.28f), PointData(0.28f, 0.35f), PointData(0.26f, 0.48f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Right arm
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.62f, 0.28f), PointData(0.72f, 0.35f), PointData(0.74f, 0.48f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Left leg
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.44f, 0.52f), PointData(0.44f, 0.70f), PointData(0.40f, 0.85f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Right leg
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.56f, 0.52f), PointData(0.56f, 0.70f), PointData(0.60f, 0.85f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Antenna
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.10f), PointData(0.5f, 0.04f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+            }
+            "Happy Alien" -> {
+                // Head oval
+                val alienHead = mutableListOf<PointData>()
+                val cx = 0.5f
+                val cy = 0.16f
+                for (i in 0..16) {
+                    val angle = (i * 2 * Math.PI / 16).toFloat()
+                    val px = cx + 0.08f * Math.cos(angle.toDouble()).toFloat()
+                    val scaleY = if (angle < Math.PI) 0.06f else 0.08f
+                    val py = cy + scaleY * Math.sin(angle.toDouble()).toFloat()
+                    alienHead.add(PointData(px, py))
+                }
+                strokesList.add(StrokePath(points = alienHead, color = brushColor, width = brushWidth))
+
+                // Left Antenna
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.46f, 0.10f), PointData(0.42f, 0.03f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Right Antenna
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.54f, 0.10f), PointData(0.58f, 0.03f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Center eye
+                val eyePoints = mutableListOf<PointData>()
+                for (i in 0..8) {
+                    val angle = (i * 2 * Math.PI / 8).toFloat()
+                    val px = cx + 0.015f * Math.cos(angle.toDouble()).toFloat()
+                    val py = cy - 0.01f + 0.015f * Math.sin(angle.toDouble()).toFloat()
+                    eyePoints.add(PointData(px, py))
+                }
+                strokesList.add(StrokePath(points = eyePoints, color = brushColor, width = brushWidth))
+
+                // Body
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.22f), PointData(0.5f, 0.48f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Arms
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.28f), PointData(0.34f, 0.32f), PointData(0.30f, 0.45f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.28f), PointData(0.66f, 0.32f), PointData(0.70f, 0.45f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                // Legs
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.48f), PointData(0.44f, 0.65f), PointData(0.40f, 0.82f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+                strokesList.add(StrokePath(
+                    points = listOf(PointData(0.5f, 0.48f), PointData(0.56f, 0.65f), PointData(0.60f, 0.82f)),
+                    color = brushColor,
+                    width = brushWidth
+                ))
+            }
+            "Bouncing Ball" -> {
+                val ballPoints = mutableListOf<PointData>()
+                val numPoints = 16
+                val cx = 0.5f
+                val cy = when (currentFrameIndex % 4) {
+                    0 -> 0.20f
+                    1 -> 0.45f
+                    2 -> 0.78f
+                    else -> 0.45f
+                }
+                val rx = if (currentFrameIndex % 4 == 2) 0.09f else 0.06f
+                val ry = if (currentFrameIndex % 4 == 2) 0.04f else 0.06f
+                for (i in 0..numPoints) {
+                    val angle = (i * 2 * Math.PI / numPoints).toFloat()
+                    val px = cx + rx * Math.cos(angle.toDouble()).toFloat()
+                    val py = cy + ry * Math.sin(angle.toDouble()).toFloat()
+                    ballPoints.add(PointData(px, py))
+                }
+                strokesList.add(StrokePath(points = ballPoints, color = brushColor, width = brushWidth))
+            }
+        }
+
+        currentLayers[currentLayerIndex] = layer.copy(strokes = strokesList)
         currentFrames[currentFrameIndex] = frame.copy(layers = currentLayers)
         projectData = projectData.copy(frames = currentFrames)
         saveCurrentProject()

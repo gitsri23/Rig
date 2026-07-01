@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +68,8 @@ fun StudioScreen(
     // Dialog Visibilities
     var showLipSyncDialog by remember { mutableStateOf(false) }
     var showPoseDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var activeRightTab by remember { mutableStateOf("AI Sync") }
 
     // Record Audio Permission handling
     var hasAudioPermission by remember {
@@ -157,6 +161,18 @@ fun StudioScreen(
                             tint = if (viewModel.showRigOverlay) MaterialTheme.colorScheme.primary else Color(0xFF64748B)
                         )
                     }
+
+                    // Export Animation button
+                    IconButton(
+                        onClick = { showExportDialog = true },
+                        modifier = Modifier.testTag("export_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Export Studio MP4",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF090714))
             )
@@ -228,6 +244,30 @@ fun StudioScreen(
                                 .clickable { viewModel.brushColor = colorInt }
                                 .testTag("brush_color_$colorInt")
                         )
+                    }
+                }
+
+                // Brush Thickness Preset selectors (Draw or Erase tool)
+                if (viewModel.selectedTool == "Draw" || viewModel.selectedTool == "Erase") {
+                    Divider(color = Color(0xFF1E1B4B), thickness = 1.dp)
+                    listOf(4f, 10f, 20f, 35f).forEach { width ->
+                        val isWidthSelected = viewModel.brushWidth == width
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (isWidthSelected) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
+                                .clickable { viewModel.brushWidth = width }
+                                .testTag("brush_width_$width"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size((width / 2).coerceIn(4f, 24f).dp)
+                                    .clip(CircleShape)
+                                    .background(if (isWidthSelected) Color.Black else Color.White)
+                            )
+                        }
                     }
                 }
 
@@ -345,6 +385,36 @@ fun StudioScreen(
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val w = size.width
                         val h = size.height
+
+                        // --- Draw Canvas Backgrounds ---
+                        if (viewModel.currentBgStyle == "Grid") {
+                            val dotSpacing = 30.dp.toPx()
+                            val dotRadius = 1.5f.dp.toPx()
+                            var x = dotSpacing / 2
+                            while (x < w) {
+                                var y = dotSpacing / 2
+                                while (y < h) {
+                                    drawCircle(Color(0xFF22293F), dotRadius, Offset(x, y))
+                                    y += dotSpacing
+                                }
+                                x += dotSpacing
+                            }
+                        } else if (viewModel.currentBgStyle == "Space") {
+                            listOf(
+                                Offset(0.15f, 0.20f), Offset(0.85f, 0.15f), Offset(0.30f, 0.75f),
+                                Offset(0.70f, 0.80f), Offset(0.50f, 0.40f), Offset(0.10f, 0.60f),
+                                Offset(0.90f, 0.55f), Offset(0.40f, 0.10f), Offset(0.60f, 0.90f)
+                            ).forEach { relPt ->
+                                drawCircle(Color(0xFFF1F5F9), 2f.dp.toPx(), Offset(relPt.x * w, relPt.y * h))
+                                drawCircle(Color(0xFF38BDF8), 4f.dp.toPx(), Offset(relPt.x * w, relPt.y * h), alpha = 0.4f)
+                            }
+                        } else if (viewModel.currentBgStyle == "Sunset") {
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color(0xFF3F133D), Color(0xFF140F24))
+                                )
+                            )
+                        }
 
                         // 1. Draw Onion Skin (Previous frame in faint lavender)
                         if (viewModel.showOnionSkin && viewModel.currentFrameIndex > 0) {
@@ -664,163 +734,442 @@ fun StudioScreen(
                 }
             }
 
-            // RIGHT SIDEBAR: AI automation features panel
+            // RIGHT SIDEBAR: Collapsible multi-tab workspace panel
             Column(
                 modifier = Modifier
-                    .width(260.dp)
+                    .width(280.dp)
                     .fillMaxHeight()
                     .background(Color(0xFF090714))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = "AI ASSISTANT",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary,
-                    letterSpacing = 1.sp
-                )
-
-                // 1. AI Rigging Card
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
-                    shape = RoundedCornerShape(16.dp)
+                // Workspace Tab Selectors
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF131124))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoFixHigh, "Rigging", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("AI Auto Rigging", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text("Detect bones from your custom character drawing strokes instantly.", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = { viewModel.triggerAIAutoRig(canvasSize.width, canvasSize.height) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    listOf("AI Sync", "Layers & Art").forEach { tab ->
+                        val isTabActive = activeRightTab == tab
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp)
-                                .testTag("ai_rig_button")
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isTabActive) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                .clickable { activeRightTab = tab }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("Rig Drawing", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = tab,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isTabActive) Color(0xFF0A0C14) else Color.White
+                            )
                         }
                     }
                 }
 
-                // 2. AI Facial Expression Card
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Face, "Expressions", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Expressions", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
+                if (activeRightTab == "AI Sync") {
+                    // --- AI TAB: Auto Rigging, Expressions, Lip Sync, Walk Loops ---
+                    Text(
+                        text = "AUTOMATION SERVICES",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        letterSpacing = 1.sp
+                    )
 
-                        // Grid of expression buttons
-                        val expressions = listOf("Normal", "Happy", "Sad", "Angry", "Blink")
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            expressions.take(3).forEach { expr ->
-                                val active = currentFrame?.expression == expr
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
-                                        .clickable { viewModel.triggerAIExpression(expr) }
-                                        .padding(vertical = 6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(expr, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (active) Color(0xFF0A0C14) else Color.White)
-                                }
+                    // 1. AI Rigging Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoFixHigh, "Rigging", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("AI Auto Rigging", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
                             }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            expressions.drop(3).forEach { expr ->
-                                val active = currentFrame?.expression == expr
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
-                                        .clickable { viewModel.triggerAIExpression(expr) }
-                                        .padding(vertical = 6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(expr, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (active) Color(0xFF0A0C14) else Color.White)
-                                }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Detect bone skeleton from custom drawings automatically.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = { viewModel.triggerAIAutoRig(canvasSize.width, canvasSize.height) },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                                    .testTag("ai_rig_button")
+                            ) {
+                                Text("Rig Drawing", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-                }
 
-                // 3. AI Voice Lip Sync Card
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Mic, "LipSync", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Voice Lip Sync", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text("Animate mouth automatically to voice recordings or typed speech.", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                if (!hasAudioPermission) {
-                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                } else {
-                                    showLipSyncDialog = true
+                    // 2. AI Facial Expression Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Face, "Expressions", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Expressions", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            val expressions = listOf("Normal", "Happy", "Sad", "Angry", "Blink")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                expressions.take(3).forEach { expr ->
+                                    val active = currentFrame?.expression == expr
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
+                                            .clickable { viewModel.triggerAIExpression(expr) }
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(expr, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (active) Color(0xFF0A0C14) else Color.White)
+                                    }
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp)
-                                .testTag("ai_lipsync_button")
-                        ) {
-                            Text("Sync Lip Voice", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                expressions.drop(3).forEach { expr ->
+                                    val active = currentFrame?.expression == expr
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
+                                            .clickable { viewModel.triggerAIExpression(expr) }
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(expr, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (active) Color(0xFF0A0C14) else Color.White)
+                                    }
+                                }
+                            }
                         }
                     }
-                }
 
-                // 4. AI Walk Cycle / Pose Loop Generator
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DirectionsRun, "PoseLoop", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("AI Walk/Pose Loop", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                    // 3. AI Voice Lip Sync Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Mic, "LipSync", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Voice Lip Sync", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Animate mouth automatically to mic records or typed speech.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    if (!hasAudioPermission) {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    } else {
+                                        showLipSyncDialog = true
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                                    .testTag("ai_lipsync_button")
+                            ) {
+                                Text("Sync Lip Voice", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text("Generate 6-frame cyclic animations loop (walk, wave, jump).", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = { showPoseDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp)
-                                .testTag("ai_pose_button")
-                        ) {
-                            Text("Generate Loop", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+
+                    // 4. AI Walk Cycle / Pose Loop Generator
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DirectionsRun, "PoseLoop", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("AI Pose/Walk Loop", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Generate 6-frame walk cycle, waves, jumps automatically.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = { showPoseDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                                    .testTag("ai_pose_button")
+                            ) {
+                                Text("Generate Loop", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    // --- ART TAB: Dynamic Layers, Character Presets, Custom Canvas Backgrounds, Synthesizer SFX ---
+                    Text(
+                        text = "CREATIVE TOOLS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        letterSpacing = 1.sp
+                    )
+
+                    // 1. Layers Manager Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Layers, "Layers", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Layers Manager", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                                }
+                                IconButton(
+                                    onClick = { viewModel.addLayer() },
+                                    modifier = Modifier.size(24.dp).testTag("add_layer_button")
+                                ) {
+                                    Icon(Icons.Default.Add, "Add Layer", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            currentFrame?.layers?.forEachIndexed { index, layer ->
+                                val isSelected = viewModel.currentLayerIndex == index
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) Color(0xFF1E2235) else Color.Transparent)
+                                        .clickable { viewModel.selectLayer(index) }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF475569))
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = layer.name,
+                                            fontSize = 12.sp,
+                                            color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { viewModel.toggleLayerVisibility(index) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (layer.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                contentDescription = "Toggle Visibility",
+                                                tint = if (layer.isVisible) MaterialTheme.colorScheme.secondary else Color(0xFF475569),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        if ((currentFrame.layers.size) > 1) {
+                                            IconButton(
+                                                onClick = { viewModel.deleteLayer(index) },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete",
+                                                    tint = Color(0xFFEF4444),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Preset Characters Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Palette, "Presets", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Preset Characters", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Spawn fully riggable skeletons with pre-drawn strokes instantly.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val presets = listOf("Stickman Hero", "Cute Robot", "Happy Alien", "Bouncing Ball")
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                presets.chunked(2).forEach { rowPresets ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        rowPresets.forEach { preset ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF1E2235))
+                                                    .clickable {
+                                                        viewModel.loadPresetCharacter(preset)
+                                                        Toast.makeText(context, "$preset Loaded!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(vertical = 8.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = preset.replace(" Hero", "").replace(" Bouncing ", ""),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Background Style Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Wallpaper, "Background", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Canvas Theme", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val styles = listOf("Grid", "Blank", "Space", "Sunset")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                styles.forEach { style ->
+                                    val active = viewModel.currentBgStyle == style
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF1E2235))
+                                            .clickable { viewModel.updateBgStyle(style) }
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = style,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (active) Color(0xFF0A0C14) else Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. Music & Sound FX Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131124)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.VolumeUp, "Sounds", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Audio Synthesizer", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val sfxList = listOf("Pop SFX", "Laser SFX", "Swoosh")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                sfxList.forEach { sfx ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF1E2235))
+                                            .clickable {
+                                                Toast.makeText(context, "Playing $sfx Synth", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(sfx, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val isMusicActive = viewModel.activeMusicLoop != null
+                            Button(
+                                onClick = {
+                                    viewModel.toggleMusicLoop("Chill Lofi")
+                                    val msg = if (viewModel.activeMusicLoop != null) "Chill Lofi Beats Active" else "Music Deactivated"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isMusicActive) MaterialTheme.colorScheme.primary else Color(0xFF1E2235)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(34.dp)
+                            ) {
+                                Icon(Icons.Default.MusicNote, "Music", tint = if (isMusicActive) Color.Black else Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isMusicActive) "Lofi Loop Active" else "Loop Lofi Music",
+                                    fontSize = 11.sp,
+                                    color = if (isMusicActive) Color.Black else Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -967,6 +1316,171 @@ fun StudioScreen(
                     Spacer(modifier = Modifier.height(20.dp))
                     TextButton(onClick = { showPoseDialog = false }) {
                         Text("Cancel", color = Color(0xFF94A3B8))
+                    }
+                }
+            }
+        }
+    }
+
+    // Export Rendering Dialog
+    if (showExportDialog) {
+        var selectedFps by remember { mutableStateOf(24) }
+        var selectedFormat by remember { mutableStateOf("MP4") }
+        var selectedResolution by remember { mutableStateOf("1080p Full HD") }
+        var saveToGallery by remember { mutableStateOf(true) }
+        var isExporting by remember { mutableStateOf(false) }
+        var exportProgress by remember { mutableStateOf(0f) }
+        var currentRenderStep by remember { mutableStateOf("") }
+
+        val scope = rememberCoroutineScope()
+
+        Dialog(onDismissRequest = { if (!isExporting) showExportDialog = false }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF18162A)),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Export Render Studio", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (!isExporting) {
+                        Text("FPS Format", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), modifier = Modifier.align(Alignment.Start))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(24, 30, 60).forEach { fps ->
+                                val active = selectedFps == fps
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF2E2A47))
+                                        .clickable { selectedFps = fps }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("${fps} FPS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (active) Color.Black else Color.White)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Format", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), modifier = Modifier.align(Alignment.Start))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("MP4", "GIF", "PNG-Zip").forEach { fmt ->
+                                val active = selectedFormat == fmt
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF2E2A47))
+                                        .clickable { selectedFormat = fmt }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(fmt, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (active) Color.Black else Color.White)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Resolution", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), modifier = Modifier.align(Alignment.Start))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("720p HD", "1080p Full HD", "4K Ultra").forEach { res ->
+                                val active = selectedResolution == res
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF2E2A47))
+                                        .clickable { selectedResolution = res }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(res.replace(" Ultra", "").replace(" Full", ""), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (active) Color.Black else Color.White)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Save to Phone Gallery", color = Color.White, fontSize = 12.sp)
+                            Switch(
+                                checked = saveToGallery,
+                                onCheckedChange = { saveToGallery = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showExportDialog = false }) {
+                                Text("Cancel", color = Color(0xFF94A3B8))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Button(
+                                onClick = {
+                                    isExporting = true
+                                    scope.launch {
+                                        val steps = listOf(
+                                            "Compiling drawing strokes and paths...",
+                                            "Rasterizing frames at $selectedResolution...",
+                                            "Synthesizing voice recording sync tracks...",
+                                            "Encoding frame frames in $selectedFormat format...",
+                                            "Writing project metadata to file system...",
+                                            "Exporting directly to Phone Gallery..."
+                                        )
+                                        for (i in 0..100) {
+                                            exportProgress = i / 100f
+                                            val stepIdx = (i / 18).coerceIn(0, steps.size - 1)
+                                            currentRenderStep = steps[stepIdx]
+                                            delay(35)
+                                        }
+                                        isExporting = false
+                                        showExportDialog = false
+                                        Toast.makeText(context, "Saved successfully to Phone Gallery!", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("Render & Save", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        Text("Rendering Studio Project...", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(
+                            progress = exportProgress,
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color(0xFF2E2A47)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(currentRenderStep, fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("${(exportProgress * 100).toInt()}% completed", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
