@@ -1,0 +1,6 @@
+{
+  "name": "Animate AI",
+  "description": "An AI-powered 2D animation studio that combines drawing simplicity with automatic rigging, facial expression generation, and voice-lip sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
