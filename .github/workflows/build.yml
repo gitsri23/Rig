@@ -1,0 +1,76 @@
+name: Build Video App APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Create Missing Local Properties & Keystore
+        run: |
+          touch local.properties
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 9.3.1
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Smart Replace Package Name & App Name
+        run: |
+          # 1. Change App Name in strings.xml
+          find app -name "strings.xml" -exec sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Video editor<\/string>/g' {} + || true
+          
+          # 2. Extract Old Package Name to replace it everywhere
+          OLD_PKG=$(grep -Eo 'namespace[ =]+["'\''][^"'\'']+["'\'']' app/build.gradle* | head -n 1 | grep -Eo '["'\''][^"'\'']+["'\'']' | tr -d "\"'")
+          if [ -z "$OLD_PKG" ]; then
+            OLD_PKG="com.example" # మీ ఎర్రర్ లాగ్స్ ఆధారంగా ఫాల్‌బ్యాక్
+          fi
+          echo "Replacing old package: $OLD_PKG with com.videoedit.devio"
+
+          # 3. Change package name in AndroidManifest.xml
+          find app -name "AndroidManifest.xml" -exec sed -i "s/$OLD_PKG/com.videoedit.devio/g" {} + || true
+
+          # 4. FIX FOR COMPILE ERROR: Replace old package inside ALL Kotlin, Java, and XML files (Fixes Imports)
+          find app/src/main -type f \( -name "*.kt" -o -name "*.java" -o -name "*.xml" \) -exec sed -i "s/$OLD_PKG/com.videoedit.devio/g" {} + || true
+
+          # 5. Finally, update applicationId and namespace in build.gradle
+          find app -name "build.gradle*" -exec sed -i -E 's/applicationId[ =]+["\047][^"\047]+["\047]/applicationId = "com.videoedit.devio"/g' {} + || true
+          find app -name "build.gradle*" -exec sed -i -E 's/applicationId ["\047][^"\047]+["\047]/applicationId "com.videoedit.devio"/g' {} + || true
+          find app -name "build.gradle*" -exec sed -i -E 's/namespace[ =]+["\047][^"\047]+["\047]/namespace = "com.videoedit.devio"/g' {} + || true
+          find app -name "build.gradle*" -exec sed -i -E 's/namespace ["\047][^"\047]+["\047]/namespace "com.videoedit.devio"/g' {} + || true
+
+      - name: Compile Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Push APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Video Editor Release v1.0.${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
